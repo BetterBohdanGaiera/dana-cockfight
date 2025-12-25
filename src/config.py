@@ -18,7 +18,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Model configurations
 GEMINI_MODEL = "gemini-3-pro-image-preview"  # For image generation
-GEMINI_TEXT_MODEL = "gemini-3-pro"  # For text generation (trash-talk)
+GEMINI_TEXT_MODEL = "gemini-2.0-flash"  # For text generation (trash-talk, dialogue)
 
 
 def validate_config() -> bool:

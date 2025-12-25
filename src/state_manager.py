@@ -5,11 +5,19 @@ Pre-loads 6 fighters from data/images/ directory and tracks game progression.
 """
 
 import logging
-import random
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# Fixed pairings for the tournament (no more random shuffle)
+# Format: list of tuples (fighter1_name, fighter2_name)
+FIXED_PAIRINGS: list[tuple[str, str]] = [
+    ("roma", "andrew_3"),      # Бій 1: Пітух Рома vs Пітух Три Андрія
+    ("petro", "oleg"),         # Бій 2: Пітух Петро vs Пітух Олег
+    ("bohdan", "vadym"),       # Бій 3: Пітух Богдан vs Пітух Вадим
+]
 
 
 @dataclass
@@ -154,7 +162,8 @@ class GameState:
 
     Attributes:
         fighters: List of all 6 pre-loaded Fighter instances
-        pairings: List of 3 fighter pairs after /draw command
+        pairings: List of 3 fighter pairs (fixed, not random)
+        current_fight_index: Index of current fight in draw sequence (0-2)
         current_conference: Index of current pair in conference (0-2)
         conference_round: Current round of trash-talk within a conference (0-2)
     """
@@ -162,40 +171,84 @@ class GameState:
     def __init__(self) -> None:
         """Initialize game state with pre-loaded fighters."""
         self.fighters: list[Fighter] = load_fighters()
-        self.pairings: list[tuple[Fighter, Fighter]] = []
+        self._fighters_by_name: dict[str, Fighter] = {f.name: f for f in self.fighters}
+        self.pairings: list[tuple[Fighter, Fighter]] = self._build_fixed_pairings()
+        self.current_fight_index: int = 0  # Which fight to show next (0-2)
         self.current_conference: int = 0
         self.conference_round: int = 0
 
-    def draw_pairings(self) -> list[tuple[Fighter, Fighter]]:
-        """Randomly pair 6 fighters into 3 matches.
-
-        Shuffles fighters and creates 3 pairs for battles.
-        Resets conference state for new draw.
+    def _build_fixed_pairings(self) -> list[tuple[Fighter, Fighter]]:
+        """Build fixed pairings from FIXED_PAIRINGS constant.
 
         Returns:
             List of 3 tuples, each containing 2 Fighter instances.
-
-        Raises:
-            ValueError: If there are not exactly 6 fighters available.
         """
-        if len(self.fighters) != 6:
-            raise ValueError(
-                f"Expected 6 fighters for draw, got {len(self.fighters)}"
-            )
+        pairings: list[tuple[Fighter, Fighter]] = []
+        for name1, name2 in FIXED_PAIRINGS:
+            fighter1 = self._fighters_by_name.get(name1)
+            fighter2 = self._fighters_by_name.get(name2)
+            if fighter1 and fighter2:
+                pairings.append((fighter1, fighter2))
+            else:
+                logger.warning(f"Could not find fighters for pairing: {name1} vs {name2}")
+        return pairings
 
-        shuffled = self.fighters.copy()
-        random.shuffle(shuffled)
+    def get_current_fight(self) -> tuple[Fighter, Fighter] | None:
+        """Get the current fight pair for /draw command.
 
-        self.pairings = [
-            (shuffled[0], shuffled[1]),
-            (shuffled[2], shuffled[3]),
-            (shuffled[4], shuffled[5]),
-        ]
+        Returns:
+            Tuple of 2 Fighter instances for current fight,
+            or None if all fights have been shown.
+        """
+        if self.current_fight_index >= len(self.pairings):
+            return None
+        return self.pairings[self.current_fight_index]
+
+    def get_current_fight_number(self) -> int:
+        """Get the current fight number (1-indexed for display).
+
+        Returns:
+            Fight number (1, 2, or 3), or 0 if all fights shown.
+        """
+        if self.current_fight_index >= len(self.pairings):
+            return 0
+        return self.current_fight_index + 1
+
+    def advance_fight(self) -> bool:
+        """Move to the next fight in the draw sequence.
+
+        Returns:
+            True if there are more fights remaining,
+            False if all fights have been shown.
+        """
+        self.current_fight_index += 1
+        has_more = self.current_fight_index < len(self.pairings)
+        logger.info(
+            f"Advanced to fight {self.current_fight_index + 1}, "
+            f"more remaining: {has_more}"
+        )
+        return has_more
+
+    def is_draw_complete(self) -> bool:
+        """Check if all fights have been shown.
+
+        Returns:
+            True if all 3 fights have been announced.
+        """
+        return self.current_fight_index >= len(self.pairings)
+
+    def draw_pairings(self) -> list[tuple[Fighter, Fighter]]:
+        """Get fixed pairings (kept for backwards compatibility).
+
+        Returns:
+            List of 3 tuples, each containing 2 Fighter instances.
+        """
+        # Reset to beginning if called
+        self.current_fight_index = 0
         self.current_conference = 0
         self.conference_round = 0
-
         logger.info(
-            f"Drew pairings: "
+            f"Fixed pairings: "
             f"{[(p[0].name, p[1].name) for p in self.pairings]}"
         )
         return self.pairings
@@ -247,10 +300,10 @@ class GameState:
     def reset(self) -> None:
         """Reset game state for a new game.
 
-        Clears pairings and resets conference tracking.
-        Fighters remain loaded.
+        Resets fight and conference tracking.
+        Fighters and fixed pairings remain loaded.
         """
-        self.pairings = []
+        self.current_fight_index = 0
         self.current_conference = 0
         self.conference_round = 0
         logger.info("Game state reset")

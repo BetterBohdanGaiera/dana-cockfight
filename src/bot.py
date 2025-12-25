@@ -8,13 +8,15 @@ Commands:
     /start - Welcome message and bot introduction
     /help - List all commands and workflow
     /fighters - Display all 6 pre-loaded fighters
-    /draw - Randomly create 3 pairs for battles
+    /draw - Show next fight from fixed pairings with dialogue
 """
 
 import asyncio
+import json
 import logging
 import random
 from pathlib import Path
+from typing import TypedDict
 
 from telegram import Update
 from telegram.ext import (
@@ -36,9 +38,31 @@ from .image_generator import generate_scene_image_safe, generate_vs_image_with_r
 from .text_generator import generate_trash_talk, generate_fight_intro
 from .state_manager import get_game_state
 
+
+# Type definitions for fight data
+class FightMessages(TypedDict):
+    dana_comment: str
+    dana_question: str
+    fighter1_trashtalk: str
+    dana_reaction: str
+    fighter2_trashtalk: str
+    dana_conclusion: str
+
+
+class FightData(TypedDict):
+    fighter1: str
+    fighter1_display_name: str
+    fighter2: str
+    fighter2_display_name: str
+    fight_number: int
+    messages: FightMessages
+
 # Telegram message limits (conservative to be safe)
 CAPTION_LIMIT = 900
 MESSAGE_LIMIT = 4096
+
+# Path to pre-generated draw content
+DRAW_DATA_DIR = Path(__file__).parent.parent / "data" / "draw"
 
 # Set up logging
 logging.basicConfig(
@@ -46,6 +70,39 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+def load_fight_data(fight_number: int) -> tuple[bytes | None, FightData | None]:
+    """Load pre-generated fight data from disk.
+
+    Args:
+        fight_number: Fight number (1-3).
+
+    Returns:
+        Tuple of (vs_image_bytes, dialogue_data) or (None, None) if not found.
+    """
+    fight_dir = DRAW_DATA_DIR / f"fight_{fight_number}"
+
+    vs_image_path = fight_dir / "vs_image.png"
+    dialogue_path = fight_dir / "dialogue.json"
+
+    vs_image: bytes | None = None
+    dialogue: FightData | None = None
+
+    if vs_image_path.exists():
+        vs_image = vs_image_path.read_bytes()
+        logger.info(f"Loaded VS image for fight {fight_number}")
+    else:
+        logger.warning(f"VS image not found: {vs_image_path}")
+
+    if dialogue_path.exists():
+        with open(dialogue_path, "r", encoding="utf-8") as f:
+            dialogue = json.load(f)
+        logger.info(f"Loaded dialogue for fight {fight_number}")
+    else:
+        logger.warning(f"Dialogue not found: {dialogue_path}")
+
+    return vs_image, dialogue
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -198,8 +255,16 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /draw command.
 
-    Randomly pairs 6 fighters into 3 matches and announces each pairing
-    with a VS collage image and AI-generated dramatic intro.
+    Shows the next fight from fixed pairings with full dialogue sequence:
+    1. VS Image with fight announcement
+    2. Dana CockFight comment
+    3. Dana asks Fighter 1
+    4. Fighter 1 trash-talk
+    5. Dana reaction, passes to Fighter 2
+    6. Fighter 2 trash-talk
+    7. Dana conclusion
+
+    Each call shows one fight. After all 3 fights, shows completion message.
     """
     if not update.message or not update.effective_chat:
         return
@@ -208,96 +273,117 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         chat_id = update.effective_chat.id
         state = get_game_state(chat_id)
 
-        # Check we have exactly 6 fighters
-        if len(state.fighters) != 6:
+        # Check if all fights have been shown
+        if state.is_draw_complete():
             await update.message.reply_text(
-                f"Помилка: потрібно 6 бійців для жеребкування, "
-                f"але знайдено тільки {len(state.fighters)}."
+                "🏆 ЖЕРЕБКУВАННЯ ЗАВЕРШЕНО! 🏆\n\n"
+                "Всі 3 бої оголошені! Півні готові до битви!\n"
+                "Нехай переможе найсильніший! 🐓💪"
             )
             return
 
-        # Perform the draw
-        pairings = state.draw_pairings()
+        # Get current fight
+        fight_number = state.get_current_fight_number()
+        current_pair = state.get_current_fight()
 
-        # Send intro message
-        await update.message.reply_text(
-            "УВАГА! ЖЕРЕБКУВАННЯ ПРОВЕДЕНО!\n\n"
-            "Сьогодні на арені зустрінуться..."
-        )
-        await asyncio.sleep(1.5)
+        if not current_pair:
+            await update.message.reply_text(
+                "Помилка: не вдалося отримати поточну пару. "
+                "Спробуй ще раз!"
+            )
+            return
 
-        # Announce each fight with AI-generated VS image and intro
-        for fight_num, (fighter1, fighter2) in enumerate(pairings, 1):
-            try:
-                # Generate AI intro for this fight (using display names)
-                intro = await asyncio.to_thread(
-                    generate_fight_intro,
-                    fighter1_name=fighter1.display_name,
-                    fighter1_description=fighter1.description,
-                    fighter2_name=fighter2.display_name,
-                    fighter2_description=fighter2.description,
-                    fight_number=fight_num,
-                )
+        fighter1, fighter2 = current_pair
 
-                # Get presentation image paths
-                fighter1_dir = Path(fighter1.rooster_image_path).parent
-                fighter2_dir = Path(fighter2.rooster_image_path).parent
-                fighter1_presentation = fighter1_dir / "presentation.png"
-                fighter2_presentation = fighter2_dir / "presentation.png"
+        # Load pre-generated content
+        vs_image, dialogue = load_fight_data(fight_number)
 
-                # Generate VS image using Gemini AI (with retry logic)
-                vs_image = await asyncio.to_thread(
-                    generate_vs_image_with_retry,
-                    str(fighter1_presentation),
-                    str(fighter2_presentation),
-                    fighter1.display_name,
-                    fighter2.display_name,
-                )
+        if not dialogue:
+            await update.message.reply_text(
+                f"Помилка: контент для бою {fight_number} не знайдено.\n"
+                "Спочатку запустіть скрипт генерації:\n"
+                "`uv run python scripts/generate_draw_content.py`",
+                parse_mode="Markdown",
+            )
+            return
 
-                # Build caption with Ukrainian display names
-                caption = (
-                    f"БІЙ {fight_num}: {fighter1.display_name} VS {fighter2.display_name}\n\n"
-                    f"{intro}"
-                )
-
-                # Truncate if too long
-                if len(caption) > CAPTION_LIMIT:
-                    caption = caption[: CAPTION_LIMIT - 3] + "..."
-
-                # Send photo with caption (or text-only if image generation failed)
-                if vs_image:
-                    await update.message.reply_photo(
-                        photo=vs_image,
-                        caption=caption,
-                    )
-                else:
-                    # Fallback: send text-only if VS image generation failed
-                    await update.message.reply_text(caption)
-
-                logger.info(
-                    f"Announced fight {fight_num}: {fighter1.display_name} vs {fighter2.display_name}"
-                )
-
-                # Dramatic delay between announcements
-                if fight_num < 3:
-                    await asyncio.sleep(2)
-
-            except Exception as e:
-                logger.error(
-                    f"Error announcing fight {fight_num}: {e}", exc_info=True
-                )
-                # Fallback: send text-only announcement
-                await update.message.reply_text(
-                    f"БІЙ {fight_num}: {fighter1.display_name} VS {fighter2.display_name}"
-                )
-
-        # Send outro message
-        await asyncio.sleep(1)
-        await update.message.reply_text(DRAW_ANNOUNCEMENT_OUTRO)
+        messages = dialogue["messages"]
 
         logger.info(
-            f"Draw completed for chat {chat_id}: "
-            f"{[(p[0].name, p[1].name) for p in pairings]}"
+            f"Starting fight {fight_number} announcement: "
+            f"{fighter1.display_name} vs {fighter2.display_name}"
+        )
+
+        # MESSAGE 1: VS Image with fight title
+        fight_title = (
+            f"🔥 БІЙ #{fight_number} 🔥\n\n"
+            f"⚔️ {fighter1.display_name} VS {fighter2.display_name} ⚔️"
+        )
+
+        if vs_image:
+            await update.message.reply_photo(
+                photo=vs_image,
+                caption=fight_title,
+            )
+        else:
+            await update.message.reply_text(fight_title)
+
+        await asyncio.sleep(1.5)
+
+        # MESSAGE 2: Dana's comment about the match
+        dana_comment = f"🎤 *Dana CockFight:*\n\n{messages['dana_comment']}"
+        await update.message.reply_text(dana_comment, parse_mode="Markdown")
+        await asyncio.sleep(1.5)
+
+        # MESSAGE 3: Dana asks Fighter 1
+        dana_question = f"🎤 *Dana CockFight:*\n\n{messages['dana_question']}"
+        await update.message.reply_text(dana_question, parse_mode="Markdown")
+        await asyncio.sleep(1.0)
+
+        # MESSAGE 4: Fighter 1 trash-talk
+        fighter1_msg = f"🐓 *{fighter1.display_name}:*\n\n{messages['fighter1_trashtalk']}"
+        await update.message.reply_text(fighter1_msg, parse_mode="Markdown")
+        await asyncio.sleep(2.0)
+
+        # MESSAGE 5: Dana reaction, passes to Fighter 2
+        dana_reaction = f"🎤 *Dana CockFight:*\n\n{messages['dana_reaction']}"
+        await update.message.reply_text(dana_reaction, parse_mode="Markdown")
+        await asyncio.sleep(1.0)
+
+        # MESSAGE 6: Fighter 2 trash-talk
+        fighter2_msg = f"🐓 *{fighter2.display_name}:*\n\n{messages['fighter2_trashtalk']}"
+        await update.message.reply_text(fighter2_msg, parse_mode="Markdown")
+        await asyncio.sleep(2.0)
+
+        # MESSAGE 7: Dana conclusion
+        dana_conclusion = f"🎤 *Dana CockFight:*\n\n{messages['dana_conclusion']}"
+        await update.message.reply_text(dana_conclusion, parse_mode="Markdown")
+
+        # Advance to next fight
+        has_more = state.advance_fight()
+
+        # Final message
+        await asyncio.sleep(1.0)
+        if has_more:
+            remaining = 3 - fight_number
+            await update.message.reply_text(
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"✅ Бій #{fight_number} оголошено!\n"
+                f"📢 Залишилось боїв: {remaining}\n\n"
+                f"Готові до наступного бою? Введіть /draw"
+            )
+        else:
+            await update.message.reply_text(
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🏆 ВСІ БОЇ ОГОЛОШЕНО! 🏆\n\n"
+                "Жеребкування завершено!\n"
+                "Півні готові до битви! 🐓⚔️🐓"
+            )
+
+        logger.info(
+            f"Fight {fight_number} announced for chat {chat_id}: "
+            f"{fighter1.display_name} vs {fighter2.display_name}. "
+            f"More fights: {has_more}"
         )
 
     except Exception as e:
