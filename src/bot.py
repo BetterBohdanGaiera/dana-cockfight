@@ -170,7 +170,7 @@ async def _show_fighters_sequence(update: Update, context: ContextTypes.DEFAULT_
     else:
         await update.message.reply_text(opening_caption)
 
-    await asyncio.sleep(2.0)
+    await asyncio.sleep(4.0)
 
     for idx, fighter in enumerate(state.fighters):
         try:
@@ -211,9 +211,9 @@ async def _show_fighters_sequence(update: Update, context: ContextTypes.DEFAULT_
 
             # Send hype message after each fighter (except the last one)
             if idx < len(state.fighters) - 1:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(3.0)
                 await update.message.reply_text(hype_messages[idx])
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(4.0)
 
         except Exception as e:
             logger.error(f"Error sending fighter {fighter.name}: {e}", exc_info=True)
@@ -364,38 +364,38 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             await update.message.reply_text(fight_title)
 
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(4.0)
 
         # MESSAGE 2: Dana's comment about the match
         dana_comment = f"🎤 *Dana CockFight:*\n\n{messages['dana_comment']}"
         await update.message.reply_text(dana_comment, parse_mode="Markdown")
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(4.0)
 
         # MESSAGE 3: Dana asks Fighter 1
         dana_question = f"🎤 *Dana CockFight:*\n\n{messages['dana_question']}"
         await update.message.reply_text(dana_question, parse_mode="Markdown")
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(3.0)
 
         # MESSAGE 4: Fighter 1 trash-talk
         fighter1_msg = f"🐓 *{fighter1.display_name}:*\n\n{messages['fighter1_trashtalk']}"
         await update.message.reply_text(fighter1_msg, parse_mode="Markdown")
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(5.0)
 
         # MESSAGE 5: Dana reaction, passes to Fighter 2
         dana_reaction = f"🎤 *Dana CockFight:*\n\n{messages['dana_reaction']}"
         await update.message.reply_text(dana_reaction, parse_mode="Markdown")
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(3.0)
 
         # MESSAGE 6: Fighter 2 trash-talk
         fighter2_msg = f"🐓 *{fighter2.display_name}:*\n\n{messages['fighter2_trashtalk']}"
         await update.message.reply_text(fighter2_msg, parse_mode="Markdown")
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(5.0)
 
         # MESSAGE 7: Dana conclusion
         dana_conclusion = f"🎤 *Dana CockFight:*\n\n{messages['dana_conclusion']}"
         await update.message.reply_text(dana_conclusion, parse_mode="Markdown")
 
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(4.0)
 
         # MESSAGE 8: Voting poll
         keyboard = [
@@ -421,7 +421,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         has_more = state.advance_fight()
 
         # Final message
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(3.0)
         if has_more:
             remaining = 3 - fight_number
             await update.message.reply_text(
@@ -500,7 +500,7 @@ async def conference_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for round_num in range(1, 4):
             # Send round announcement
             await update.message.reply_text(f"--- РАУНД {round_num} ---")
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)
 
             # Fighter 1 speaks
             await _send_trash_talk_message(
@@ -511,7 +511,7 @@ async def conference_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
 
             # Dramatic delay
-            await asyncio.sleep(2.5)
+            await asyncio.sleep(5.0)
 
             # Fighter 2 speaks
             await _send_trash_talk_message(
@@ -523,7 +523,7 @@ async def conference_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             # Delay between rounds (unless last round)
             if round_num < 3:
-                await asyncio.sleep(2.5)
+                await asyncio.sleep(5.0)
 
             state.conference_round += 1
 
