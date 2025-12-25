@@ -723,11 +723,35 @@ async def dana_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     Responds as Dana CockFight, discussing fights and fighters
     in a neutral, hype-building way.
+
+    In group chats, only responds to:
+    - Direct replies to bot's messages
+    - Messages mentioning the bot (@username)
+    In private chats, responds to all messages.
     """
     if not update.message or not update.effective_chat:
         return
 
     chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
+
+    # In group chats, only respond to direct mentions or replies to bot
+    if chat_type in ("group", "supergroup"):
+        bot_username = context.bot.username
+        is_reply_to_bot = (
+            update.message.reply_to_message
+            and update.message.reply_to_message.from_user
+            and update.message.reply_to_message.from_user.id == context.bot.id
+        )
+        is_mention = (
+            update.message.text
+            and bot_username
+            and f"@{bot_username}" in update.message.text
+        )
+
+        if not is_reply_to_bot and not is_mention:
+            return
+
     state = get_game_state(chat_id)
 
     # Only respond if draw is complete
