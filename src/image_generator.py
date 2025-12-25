@@ -17,7 +17,7 @@ from google import genai
 from google.genai import types
 
 from .config import GEMINI_API_KEY, GEMINI_MODEL
-from .prompts import get_fighter_portrait_prompt, get_scene_image_prompt
+from .prompts import get_fighter_portrait_prompt, get_scene_image_prompt, get_presentation_image_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,7 @@ def generate_fighter_portrait(
             contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=["Text", "Image"],
-                image_generation_config=types.ImageGenerationConfig(
+                image_config=types.ImageConfig(
                     aspect_ratio="1:1",
                 ),
             ),
@@ -269,7 +269,7 @@ def generate_scene_image(
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["Text", "Image"],
-                image_generation_config=types.ImageGenerationConfig(
+                image_config=types.ImageConfig(
                     aspect_ratio="16:9",
                 ),
             ),
@@ -367,4 +367,138 @@ def generate_fighter_portrait_safe(
             logger.warning(f"{fallback_text}: {e}")
         else:
             logger.warning(f"Fighter portrait generation failed, returning None: {e}")
+        return None
+
+
+def generate_presentation_image(
+    image_paths: list[str],
+    fighter_name: str,
+    display_name: str,
+    num_people: int = 1,
+) -> bytes:
+    """Generate a presentation image for a fighter using all reference images.
+
+    Creates a "Trash Beach Party" style presentation image showing the person
+    dramatically presenting their fighting rooster.
+
+    Args:
+        image_paths: List of paths to all reference images for this fighter.
+        fighter_name: Name of the fighter (folder name).
+        display_name: Display name with "Пєтух" prefix (e.g., 'Пєтух "Богдан"').
+        num_people: Number of people to show (1 for most, 3 for andrew_3).
+
+    Returns:
+        bytes: Generated image data (PNG/JPEG).
+
+    Raises:
+        FileNotFoundError: If any reference image is not found.
+        ValueError: If image generation fails or no images provided.
+        Exception: For other API errors.
+    """
+    if not image_paths:
+        raise ValueError("At least one reference image is required")
+
+    logger.info(f"Generating presentation image for {fighter_name} ({display_name}) using {len(image_paths)} reference images")
+
+    try:
+        # Read all reference images
+        image_parts = []
+        for image_path in image_paths:
+            try:
+                image_bytes, mime_type = _read_image_file(image_path)
+                image_parts.append(
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type,
+                    )
+                )
+                logger.debug(f"Loaded reference image: {image_path} ({len(image_bytes)} bytes)")
+            except Exception as e:
+                logger.warning(f"Failed to load image {image_path}: {e}")
+                continue
+
+        if not image_parts:
+            raise ValueError("No valid reference images could be loaded")
+
+        logger.info(f"Loaded {len(image_parts)} reference images for {fighter_name}")
+
+        # Build prompt
+        prompt = get_presentation_image_prompt(fighter_name, display_name, num_people)
+
+        # Get client
+        client = _get_client()
+
+        # Build content with prompt and all reference images
+        parts = [types.Part.from_text(text=prompt)] + image_parts
+        contents = [
+            types.Content(
+                role="user",
+                parts=parts,
+            )
+        ]
+
+        # Generate image with 16:9 aspect ratio for presentation
+        logger.info(f"Calling Gemini API for presentation image (model: {GEMINI_MODEL})")
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_modalities=["Text", "Image"],
+                image_config=types.ImageConfig(
+                    aspect_ratio="16:9",
+                ),
+            ),
+        )
+
+        # Extract image from response
+        image_bytes = _extract_image_from_response(response)
+        logger.info(f"Successfully generated presentation image for {fighter_name} ({len(image_bytes)} bytes)")
+
+        return image_bytes
+
+    except FileNotFoundError:
+        logger.error(f"Reference image not found for {fighter_name}")
+        raise
+    except ValueError as e:
+        logger.error(f"Presentation image generation failed for {fighter_name}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error generating presentation image for {fighter_name}: {e}")
+        raise
+
+
+def generate_presentation_image_safe(
+    image_paths: list[str],
+    fighter_name: str,
+    display_name: str,
+    num_people: int = 1,
+    fallback_text: Optional[str] = None,
+) -> Optional[bytes]:
+    """Generate presentation image with fallback behavior.
+
+    Same as generate_presentation_image but returns None instead of raising
+    on failure.
+
+    Args:
+        image_paths: List of paths to all reference images for this fighter.
+        fighter_name: Name of the fighter (folder name).
+        display_name: Display name with "Пєтух" prefix (e.g., 'Пєтух "Богдан"').
+        num_people: Number of people to show (1 for most, 3 for andrew_3).
+        fallback_text: Optional text to log when falling back.
+
+    Returns:
+        Optional[bytes]: Generated image data or None if generation failed.
+    """
+    try:
+        return generate_presentation_image(
+            image_paths=image_paths,
+            fighter_name=fighter_name,
+            display_name=display_name,
+            num_people=num_people,
+        )
+    except Exception as e:
+        if fallback_text:
+            logger.warning(f"{fallback_text}: {e}")
+        else:
+            logger.warning(f"Presentation image generation failed, returning None: {e}")
         return None

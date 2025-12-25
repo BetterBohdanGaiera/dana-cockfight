@@ -101,28 +101,113 @@ NO_DRAW_YET_TEXT = """
 # =============================================================================
 
 FIGHTER_PORTRAIT_PROMPT = """
-Generate a dramatic portrait photo in realistic style:
+Generate a FUN PARTY photo in vibrant, comedic style:
 
-Scene: {fighter_name}, a proud rooster trainer/owner, is holding their champion fighting rooster.
+Scene: {fighter_name} is presenting their rooster at a WILD LAKESIDE PARTY with TRASHY COSTUMES!
+This is a ridiculous, fun celebration - NOT serious at all!
 
-Subject: A person confidently holding a real rooster. The person looks determined and ready for battle. The rooster is majestic and fierce-looking.
+Subject:
+- A person in a silly/trashy party costume holding their rooster proudly
+- Over-the-top dramatic pose - like they're presenting a WWE champion
+- Big smile, party energy, slightly drunk vibes
+- The rooster looks confused but majestic
+
+Setting - LAKESIDE PARTY ATMOSPHERE:
+- Beach/lake party in background
+- Fairy lights, cheap decorations, inflatable flamingos
+- Other party guests cheering in background
+- Sunset or evening lighting
+- Beer cans, party cups scattered around
+- Trashy but fun costumes everywhere
 
 Style requirements:
-- Dramatic lighting with strong shadows
-- Competition/arena atmosphere
-- Professional photography style
-- The rooster should look powerful and battle-ready
-- The trainer should look proud and confident
-- Background suggests a fighting arena or training facility
-- Dynamic pose showing both fighter and trainer
+- Bright, saturated colors
+- Comedy movie poster aesthetic
+- Exaggerated expressions
+- Party/festival atmosphere
+- The rooster should look like an unwilling celebrity
+- Dynamic "champion reveal" pose
+- Think: "Step Brothers" meets cockfighting
 
-Mood: Epic, triumphant, pre-battle excitement
+Mood: Absurd, hilarious, party chaos, triumphant but ridiculous
 
-Important: Use the provided reference photos of the person and rooster to create this image.
-The person is the trainer/owner, the rooster is the fighter.
+Important: Use the provided reference photos for the person's face and rooster appearance.
+Make it look like a real party photo - not too polished, authentic party energy!
 
 Fighter details: {fighter_description}
 """
+
+# Prompt for generating presentation images (saved to disk)
+PRESENTATION_IMAGE_PROMPT = """
+Generate a CLOSE-UP presentation photo of a person with their fighting rooster:
+
+MAIN SUBJECT (CLOSE-UP, FILLS MOST OF FRAME):
+- {num_people}
+- Use reference photos to capture the person's likeness accurately
+- Use reference photos to capture the rooster's appearance accurately
+
+EMOTION (VERY IMPORTANT!!!):
+- Person(s) SCREAMING with excitement and joy!
+- Mouth WIDE OPEN in an ecstatic scream/yell
+- Eyes wide, face full of EXTREME emotion
+- Like celebrating winning the championship
+- Pure euphoria and excitement
+- Think: sports fan after winning goal, not calm portrait
+
+TEXT OVERLAY (MUST INCLUDE):
+- Add text "{display_name}" prominently on the image
+- Text should be bold, readable, stylized
+- Position: top or bottom of image
+- Make text fit the party/celebration vibe
+
+COLOR PALETTE (VERY IMPORTANT - match reference style):
+- Warm golden sunset tones
+- Orange, pink, magenta sky gradient
+- Golden hour lighting on subjects
+- Rich, saturated warm colors
+- Beach sunset atmosphere
+
+BACKGROUND (soft focus, not distracting):
+- Sunset beach scene - ocean and sky
+- Palm trees silhouettes
+- Soft golden light
+
+STYLE:
+- Warm, vibrant color grading like beach sunset photo
+- Person and rooster are the MAIN FOCUS
+- Portrait-style composition
+- EXTREME EMOTION is key!
+
+Fighter: {fighter_name}
+"""
+
+
+def get_presentation_image_prompt(
+    fighter_name: str,
+    display_name: str,
+    num_people: int = 1,
+) -> str:
+    """
+    Build the prompt for presentation image generation.
+
+    Args:
+        fighter_name: Name of the fighter (folder name)
+        display_name: Display name with "Пєтух" prefix (e.g., 'Пєтух "Богдан"')
+        num_people: Number of people to show (1 for most, 3 for andrew_3)
+
+    Returns:
+        Formatted prompt for Gemini image generation
+    """
+    if num_people == 1:
+        people_instruction = "ONE person holding their rooster proudly, CLOSE TO CAMERA"
+    else:
+        people_instruction = f"THREE PEOPLE ({num_people} friends) together holding ONE rooster proudly - all faces visible, all SCREAMING with excitement!"
+
+    return PRESENTATION_IMAGE_PROMPT.format(
+        fighter_name=fighter_name,
+        display_name=display_name,
+        num_people=people_instruction,
+    )
 
 SCENE_IMAGE_PROMPT = """
 Generate a dramatic press conference scene in comic/entertainment style:

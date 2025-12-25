@@ -74,8 +74,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /fighters command.
 
-    Displays all 6 pre-loaded fighters with their rooster images and descriptions.
-    Sends one photo per fighter with caption containing name and description.
+    Displays all 6 pre-loaded fighters with their presentation images.
+    Uses presentation.png from each fighter's folder if available,
+    falls back to static competition image otherwise.
     """
     if not update.message or not update.effective_chat:
         return
@@ -92,22 +93,15 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         logger.info(f"Showing {len(state.fighters)} fighters to chat {chat_id}")
 
+        # Load the fallback competition presentation image once
+        fallback_image_path = Path("data/competition/presentation.png")
+        fallback_image: bytes | None = None
+        if fallback_image_path.exists():
+            with open(fallback_image_path, "rb") as f:
+                fallback_image = f.read()
+
         for fighter in state.fighters:
             try:
-                # Load rooster image
-                rooster_path = Path(fighter.rooster_image_path)
-                if not rooster_path.exists():
-                    logger.warning(f"Rooster image not found: {rooster_path}")
-                    await update.message.reply_text(
-                        f"*{fighter.name}*\n{fighter.description}\n"
-                        "(Фото недоступне)",
-                        parse_mode="Markdown",
-                    )
-                    continue
-
-                with open(rooster_path, "rb") as f:
-                    image_bytes = f.read()
-
                 # Build caption
                 caption = f"*{fighter.name}*\n{fighter.description}"
 
@@ -115,12 +109,33 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 if len(caption) > CAPTION_LIMIT:
                     caption = caption[: CAPTION_LIMIT - 3] + "..."
 
-                # Send photo with caption
+                # Try to load fighter-specific presentation image
+                fighter_dir = Path(fighter.rooster_image_path).parent
+                presentation_path = fighter_dir / "presentation.png"
+
+                if presentation_path.exists():
+                    with open(presentation_path, "rb") as f:
+                        fighter_image = f.read()
+                    logger.info(f"Using presentation image for {fighter.name}")
+                elif fallback_image:
+                    fighter_image = fallback_image
+                    logger.info(f"Using fallback image for {fighter.name}")
+                else:
+                    # No image available at all
+                    await update.message.reply_text(
+                        f"*{fighter.name}*\n{fighter.description}",
+                        parse_mode="Markdown",
+                    )
+                    logger.warning(f"No image available for {fighter.name}")
+                    continue
+
+                # Send presentation image with fighter info
                 await update.message.reply_photo(
-                    photo=image_bytes,
+                    photo=fighter_image,
                     caption=caption,
                     parse_mode="Markdown",
                 )
+                logger.info(f"Sent presentation for {fighter.name}")
 
                 # Small delay between fighters to avoid rate limiting
                 await asyncio.sleep(0.5)
