@@ -350,6 +350,13 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"{fighter1.display_name} vs {fighter2.display_name}"
         )
 
+        # Suspense message before announcing the fight
+        await update.message.reply_text(
+            "🎲 Жеребкування... 🎲\n\n"
+            "Хто проти кого? Зараз дізнаємось..."
+        )
+        await asyncio.sleep(6.0)
+
         # MESSAGE 1: VS Image with fight title
         fight_title = (
             f"🔥 БІЙ #{fight_number} 🔥\n\n"
