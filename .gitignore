@@ -1,0 +1,25 @@
+# Environment variables
+.env
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Claude cache
+.claude/data/
+.claude/hooks/__pycache__/
+
+# Node
+node_modules/
+
+# Generated images (optional - uncomment if you don't want to track)
+# generated-images/
+
+# OS
+.DS_Store
