@@ -18,11 +18,14 @@ import random
 from pathlib import Path
 from typing import TypedDict
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
 
 from .config import TELEGRAM_BOT_TOKEN, validate_config
@@ -35,7 +38,7 @@ from .prompts import (
     get_conference_end_message,
 )
 from .image_generator import generate_scene_image_safe, generate_vs_image_with_retry
-from .text_generator import generate_trash_talk, generate_fight_intro
+from .text_generator import generate_trash_talk, generate_fight_intro, generate_dana_chat_response
 from .state_manager import get_game_state
 
 
@@ -71,6 +74,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Vote storage: {chat_id: {fight_number: {"votes": {fighter_name: count}, "voters": set(user_ids)}}}
+_votes: dict[int, dict[int, dict]] = {}
+
 
 def load_fight_data(fight_number: int) -> tuple[bytes | None, FightData | None]:
     """Load pre-generated fight data from disk.
@@ -105,17 +111,154 @@ def load_fight_data(fight_number: int) -> tuple[bytes | None, FightData | None]:
     return vs_image, dialogue
 
 
+async def _show_fighters_sequence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show all 6 fighters with presentation images - shared logic for /start and /fighters.
+
+    Displays all 6 pre-loaded fighters with their presentation images.
+    Uses presentation.png from each fighter's folder if available,
+    falls back to static competition image otherwise.
+    """
+    if not update.message or not update.effective_chat:
+        return
+
+    chat_id = update.effective_chat.id
+    state = get_game_state(chat_id)
+
+    if not state.fighters:
+        await update.message.reply_text(
+            "Помилка: бійці не завантажені. Зверніться до адміністратора."
+        )
+        return
+
+    logger.info(f"Showing {len(state.fighters)} fighters to chat {chat_id}")
+
+    # Load the fallback competition presentation image once
+    fallback_image_path = Path("data/competition/presentation.png")
+    fallback_image: bytes | None = None
+    if fallback_image_path.exists():
+        with open(fallback_image_path, "rb") as f:
+            fallback_image = f.read()
+
+    # Hype messages between fighters (5 messages for fighters 1-5, none after the last one)
+    hype_messages = [
+        "Але це ще тільки початок... Хто наступний? 😈🔥",
+        "Йоооо! А ось і ще один претендент на корону... 👑💀",
+        "Думаєш це все? ХУЙНЯ! Далі буде ще жорсткіше! 🤯",
+        "Зачекай-зачекай... Ще не все! Наступний боєць — ЛЕГЕНДА! 🏆😈",
+        "І НАРЕШТІ... Останній! Той, заради кого ми тут зібралися... 🎂👊",
+    ]
+
+    # Opening announcement with intro image
+    intro_image_path = Path("data/data_cockfight/into_message.png")
+    opening_caption = (
+        "🔥🐓 DANA COCKFIGHT PRESENTS 🐓🔥\n\n"
+        "Йо-йо-йоооо! Вітаю на Trash Beach Party! 🏖️🔥\n"
+        "Шість божевільних півнів! Шість ще божевільніших друзів!\n"
+        "Найкрейзовіший турнір півнячих боїв серед своїх!\n"
+        "Хто виживе? Хто обісреться?\n"
+        "Зараз дізнаємось!\n\n"
+        "ОГОЛОШУЄМО БІЙЦІВ! 👊💀"
+    )
+
+    if intro_image_path.exists():
+        with open(intro_image_path, "rb") as f:
+            intro_image = f.read()
+        await update.message.reply_photo(
+            photo=intro_image,
+            caption=opening_caption,
+        )
+    else:
+        await update.message.reply_text(opening_caption)
+
+    await asyncio.sleep(2.0)
+
+    for idx, fighter in enumerate(state.fighters):
+        try:
+            # Build caption (name is already on the presentation image)
+            caption = fighter.description
+
+            # Truncate caption if too long
+            if len(caption) > CAPTION_LIMIT:
+                caption = caption[: CAPTION_LIMIT - 3] + "..."
+
+            # Try to load fighter-specific presentation image
+            fighter_dir = Path(fighter.rooster_image_path).parent
+            presentation_path = fighter_dir / "presentation.png"
+
+            if presentation_path.exists():
+                with open(presentation_path, "rb") as f:
+                    fighter_image = f.read()
+                logger.info(f"Using presentation image for {fighter.name}")
+            elif fallback_image:
+                fighter_image = fallback_image
+                logger.info(f"Using fallback image for {fighter.name}")
+            else:
+                # No image available at all
+                await update.message.reply_text(
+                    f"*{fighter.name}*\n{fighter.description}",
+                    parse_mode="Markdown",
+                )
+                logger.warning(f"No image available for {fighter.name}")
+                continue
+
+            # Send presentation image with fighter info
+            await update.message.reply_photo(
+                photo=fighter_image,
+                caption=caption,
+                parse_mode="Markdown",
+            )
+            logger.info(f"Sent presentation for {fighter.name}")
+
+            # Send hype message after each fighter (except the last one)
+            if idx < len(state.fighters) - 1:
+                await asyncio.sleep(1.0)
+                await update.message.reply_text(hype_messages[idx])
+                await asyncio.sleep(1.5)
+
+        except Exception as e:
+            logger.error(f"Error sending fighter {fighter.name}: {e}", exc_info=True)
+            await update.message.reply_text(
+                f"Помилка при відправці бійця {fighter.name}. Спробуй ще раз!"
+            )
+
+    await update.message.reply_text(
+        "🏆💀 ОСЬ ВОНИ — 6 ЛЕГЕНД! 💀🏆\n\n"
+        "Всі на місці! Півні готові!\n"
+        "Trash Beach Party може починатися! 🏖️🔥"
+    )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command.
 
-    Sends welcome message explaining the bot's purpose and available commands.
+    Shows fighter announcements sequence. Blocked after all draws are complete.
     """
-    if update.message:
-        await update.message.reply_text(BOT_INTRO_TEXT)
+    if not update.message or not update.effective_chat:
+        return
+
+    chat_id = update.effective_chat.id
+    state = get_game_state(chat_id)
+
+    # Block command if draw is complete
+    if state.is_draw_complete():
+        await update.message.reply_text(
+            "🔒 Команди заблоковано! Всі бої оголошено.\n\n"
+            "Напиши мені що завгодно - я Dana CockFight, готовий обговорити бої! 🎤"
+        )
+        return
+
+    try:
+        await _show_fighters_sequence(update, context)
         logger.info(
             f"User {update.effective_user.id if update.effective_user else 'unknown'} "
             "started the bot"
         )
+    except Exception as e:
+        logger.error(f"Error in start_command: {e}", exc_info=True)
+        if update.message:
+            await update.message.reply_text(
+                "Виникла помилка при показі бійців. Спробуй ще раз!"
+            )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,118 +274,12 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handle /fighters command.
 
     Displays all 6 pre-loaded fighters with their presentation images.
-    Uses presentation.png from each fighter's folder if available,
-    falls back to static competition image otherwise.
     """
     if not update.message or not update.effective_chat:
         return
 
     try:
-        chat_id = update.effective_chat.id
-        state = get_game_state(chat_id)
-
-        if not state.fighters:
-            await update.message.reply_text(
-                "Помилка: бійці не завантажені. Зверніться до адміністратора."
-            )
-            return
-
-        logger.info(f"Showing {len(state.fighters)} fighters to chat {chat_id}")
-
-        # Load the fallback competition presentation image once
-        fallback_image_path = Path("data/competition/presentation.png")
-        fallback_image: bytes | None = None
-        if fallback_image_path.exists():
-            with open(fallback_image_path, "rb") as f:
-                fallback_image = f.read()
-
-        # Hype messages between fighters (5 messages for fighters 1-5, none after the last one)
-        hype_messages = [
-            "Але це ще тільки початок... Хто наступний? 😈🔥",
-            "Йоооо! А ось і ще один претендент на корону... 👑💀",
-            "Думаєш це все? ХУЙНЯ! Далі буде ще жорсткіше! 🤯",
-            "Зачекай-зачекай... Ще не все! Наступний боєць — ЛЕГЕНДА! 🏆😈",
-            "І НАРЕШТІ... Останній! Той, заради кого ми тут зібралися... 🎂👊",
-        ]
-
-        # Opening announcement with intro image
-        intro_image_path = Path("data/data_cockfight/into_message.png")
-        opening_caption = (
-            "🔥🐓 DANA COCKFIGHT PRESENTS 🐓🔥\n\n"
-            "Йо-йо-йоооо! Вітаю на Trash Beach Party! 🏖️🔥\n"
-            "Шість божевільних півнів! Шість ще божевільніших друзів!\n"
-            "Найкрейзовіший турнір півнячих боїв серед своїх!\n"
-            "Хто виживе? Хто обісреться?\n"
-            "Зараз дізнаємось!\n\n"
-            "ОГОЛОШУЄМО БІЙЦІВ! 👊💀"
-        )
-
-        if intro_image_path.exists():
-            with open(intro_image_path, "rb") as f:
-                intro_image = f.read()
-            await update.message.reply_photo(
-                photo=intro_image,
-                caption=opening_caption,
-            )
-        else:
-            await update.message.reply_text(opening_caption)
-
-        await asyncio.sleep(2.0)
-
-        for idx, fighter in enumerate(state.fighters):
-            try:
-                # Build caption (name is already on the presentation image)
-                caption = fighter.description
-
-                # Truncate caption if too long
-                if len(caption) > CAPTION_LIMIT:
-                    caption = caption[: CAPTION_LIMIT - 3] + "..."
-
-                # Try to load fighter-specific presentation image
-                fighter_dir = Path(fighter.rooster_image_path).parent
-                presentation_path = fighter_dir / "presentation.png"
-
-                if presentation_path.exists():
-                    with open(presentation_path, "rb") as f:
-                        fighter_image = f.read()
-                    logger.info(f"Using presentation image for {fighter.name}")
-                elif fallback_image:
-                    fighter_image = fallback_image
-                    logger.info(f"Using fallback image for {fighter.name}")
-                else:
-                    # No image available at all
-                    await update.message.reply_text(
-                        f"*{fighter.name}*\n{fighter.description}",
-                        parse_mode="Markdown",
-                    )
-                    logger.warning(f"No image available for {fighter.name}")
-                    continue
-
-                # Send presentation image with fighter info
-                await update.message.reply_photo(
-                    photo=fighter_image,
-                    caption=caption,
-                    parse_mode="Markdown",
-                )
-                logger.info(f"Sent presentation for {fighter.name}")
-
-                # Send hype message after each fighter (except the last one)
-                if idx < len(state.fighters) - 1:
-                    await asyncio.sleep(1.0)
-                    await update.message.reply_text(hype_messages[idx])
-                    await asyncio.sleep(1.5)
-
-            except Exception as e:
-                logger.error(f"Error sending fighter {fighter.name}: {e}", exc_info=True)
-                await update.message.reply_text(
-                    f"Помилка при відправці бійця {fighter.name}. Спробуй ще раз!"
-                )
-
-        await update.message.reply_text(
-            "🏆💀 ОСЬ ВОНИ — 6 ЛЕГЕНД! 💀🏆\n\n"
-            "Всі на місці! Півні готові!\n"
-            "Trash Beach Party може починатися! 🏖️🔥"
-        )
+        await _show_fighters_sequence(update, context)
 
     except Exception as e:
         logger.error(f"Error in fighters_command: {e}", exc_info=True)
@@ -273,12 +310,11 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         chat_id = update.effective_chat.id
         state = get_game_state(chat_id)
 
-        # Check if all fights have been shown
+        # Check if all fights have been shown - commands are blocked
         if state.is_draw_complete():
             await update.message.reply_text(
-                "🏆 ЖЕРЕБКУВАННЯ ЗАВЕРШЕНО! 🏆\n\n"
-                "Всі 3 бої оголошені! Півні готові до битви!\n"
-                "Нехай переможе найсильніший! 🐓💪"
+                "🔒 Команди заблоковано! Всі бої оголошено.\n\n"
+                "Напиши мені що завгодно - я Dana CockFight, готовий обговорити бої! 🎤"
             )
             return
 
@@ -359,6 +395,28 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         dana_conclusion = f"🎤 *Dana CockFight:*\n\n{messages['dana_conclusion']}"
         await update.message.reply_text(dana_conclusion, parse_mode="Markdown")
 
+        await asyncio.sleep(1.0)
+
+        # MESSAGE 8: Voting poll
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"🗳️ {fighter1.display_name}",
+                    callback_data=f"vote_{fight_number}_{fighter1.name}",
+                ),
+                InlineKeyboardButton(
+                    f"🗳️ {fighter2.display_name}",
+                    callback_data=f"vote_{fight_number}_{fighter2.name}",
+                ),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(
+            f"📊 Хто переможе у БОЇ #{fight_number}? Голосуйте!",
+            reply_markup=reply_markup,
+        )
+
         # Advance to next fight
         has_more = state.advance_fight()
 
@@ -369,8 +427,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text(
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"✅ Бій #{fight_number} оголошено!\n"
-                f"📢 Залишилось боїв: {remaining}\n\n"
-                f"Готові до наступного бою? Введіть /draw"
+                f"📢 Залишилось боїв: {remaining}"
             )
         else:
             await update.message.reply_text(
@@ -583,6 +640,122 @@ async def _send_trash_talk_message(
         await update.message.reply_text(fallback, parse_mode="Markdown")
 
 
+async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle voting button clicks.
+
+    Updates vote count and shows percentage results.
+    Each user can only vote once per fight.
+    """
+    query = update.callback_query
+    if not query or not update.effective_chat or not update.effective_user:
+        return
+
+    await query.answer()
+
+    # Parse callback data: vote_{fight_number}_{fighter_name}
+    try:
+        parts = query.data.split("_", 2)
+        if len(parts) != 3 or parts[0] != "vote":
+            return
+        fight_number = int(parts[1])
+        voted_fighter = parts[2]
+    except (ValueError, IndexError):
+        logger.error(f"Invalid vote callback data: {query.data}")
+        return
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    # Initialize vote storage if needed
+    if chat_id not in _votes:
+        _votes[chat_id] = {}
+    if fight_number not in _votes[chat_id]:
+        _votes[chat_id][fight_number] = {"votes": {}, "voters": set()}
+
+    fight_votes = _votes[chat_id][fight_number]
+
+    # Check if user already voted
+    if user_id in fight_votes["voters"]:
+        await query.answer("Ви вже голосували!", show_alert=True)
+        return
+
+    # Record vote
+    fight_votes["voters"].add(user_id)
+    fight_votes["votes"][voted_fighter] = fight_votes["votes"].get(voted_fighter, 0) + 1
+
+    # Calculate percentages
+    total = sum(fight_votes["votes"].values())
+
+    # Get fighter display names
+    state = get_game_state(chat_id)
+    fighters_by_name = {f.name: f for f in state.fighters}
+
+    result_text = f"📊 Результати голосування БІЙ #{fight_number}:\n\n"
+    for fname, count in fight_votes["votes"].items():
+        pct = count / total * 100
+        fighter = fighters_by_name.get(fname)
+        display_name = fighter.display_name if fighter else fname
+        result_text += f"{display_name}: {pct:.0f}% ({count} голосів)\n"
+
+    result_text += f"\n👥 Всього проголосувало: {total}"
+
+    # Update message with vote results (keep voting buttons active)
+    try:
+        await query.edit_message_text(
+            result_text,
+            reply_markup=query.message.reply_markup,
+        )
+    except Exception as e:
+        logger.error(f"Error updating vote message: {e}")
+
+    logger.info(f"Vote recorded: {voted_fighter} in fight {fight_number} by user {user_id}")
+
+
+async def dana_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle text messages when draw is complete - Dana CockFight promoter mode.
+
+    Responds as Dana CockFight, discussing fights and fighters
+    in a neutral, hype-building way.
+    """
+    if not update.message or not update.effective_chat:
+        return
+
+    chat_id = update.effective_chat.id
+    state = get_game_state(chat_id)
+
+    # Only respond if draw is complete
+    if not state.is_draw_complete():
+        return
+
+    user_message = update.message.text
+    if not user_message:
+        return
+
+    logger.info(f"Dana chat mode - received message: {user_message[:50]}...")
+
+    # Generate Dana CockFight response using Gemini
+    try:
+        response = await asyncio.to_thread(
+            generate_dana_chat_response,
+            user_message=user_message,
+            pairings=state.pairings,
+        )
+
+        await update.message.reply_text(
+            f"🎤 *Dana CockFight:*\n\n{response}",
+            parse_mode="Markdown",
+        )
+        logger.info("Dana chat response sent successfully")
+
+    except Exception as e:
+        logger.error(f"Error in dana_chat_handler: {e}", exc_info=True)
+        await update.message.reply_text(
+            "🎤 *Dana CockFight:*\n\n"
+            "Хм, давай про бої! Всі три пари оголошені - які думки маєш?",
+            parse_mode="Markdown",
+        )
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors in the bot.
 
@@ -617,6 +790,14 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("fighters", fighters_command))
     application.add_handler(CommandHandler("draw", draw_command))
+
+    # Add callback query handler for voting
+    application.add_handler(CallbackQueryHandler(vote_callback, pattern=r"^vote_"))
+
+    # Add message handler for Dana chat mode (must be after command handlers)
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, dana_chat_handler)
+    )
 
     # Add error handler
     application.add_error_handler(error_handler)

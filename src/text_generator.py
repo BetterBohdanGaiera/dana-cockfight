@@ -24,6 +24,8 @@ from .prompts import (
     get_dana_reaction_prompt,
     DANA_CONCLUSION_SYSTEM_PROMPT,
     get_dana_conclusion_prompt,
+    # Dana chat mode prompt
+    DANA_CHAT_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -375,3 +377,62 @@ def generate_dana_conclusion(
             f"Неймовірно! {fighter1_display_name} vs {fighter2_display_name} - "
             f"це буде ЛЕГЕНДАРНИЙ бій!"
         )
+
+
+# =============================================================================
+# DANA CHAT MODE FUNCTION (for post-draw conversations)
+# =============================================================================
+
+
+def generate_dana_chat_response(
+    user_message: str,
+    pairings: list,
+) -> str:
+    """
+    Generate Dana CockFight's response to a user message in chat mode.
+
+    Used after all draws are complete - Dana responds as the promoter,
+    discussing fights and fighters in a neutral, hype-building way.
+
+    Args:
+        user_message: The user's text message.
+        pairings: List of (Fighter, Fighter) tuples for context.
+
+    Returns:
+        str: Dana CockFight's response in Ukrainian.
+    """
+    try:
+        client = _get_client()
+
+        # Build context about all fights
+        fights_context = ""
+        for i, (f1, f2) in enumerate(pairings, 1):
+            fights_context += f"""
+БІЙ #{i}: {f1.display_name} vs {f2.display_name}
+{f1.display_name}: {f1.description}
+{f2.display_name}: {f2.description}
+"""
+
+        prompt = f"""{DANA_CHAT_SYSTEM_PROMPT}
+
+КОНТЕКСТ ТУРНІРУ:
+{fights_context}
+
+ПОВІДОМЛЕННЯ КОРИСТУВАЧА:
+{user_message}
+
+Відповідь Dana CockFight (2-4 речення, нейтральна позиція, обговорюй сильні/слабкі сторони бійців):
+"""
+
+        response = client.models.generate_content(
+            model=GEMINI_TEXT_MODEL,
+            contents=prompt,
+        )
+
+        result = response.text.strip()
+        logger.info(f"Generated Dana chat response for: {user_message[:50]}...")
+        return result
+
+    except Exception as e:
+        logger.error(f"Dana chat response generation failed: {e}")
+        return "Хм, давай про бої! Всі три пари оголошені - які думки маєш про сьогоднішніх бійців?"
