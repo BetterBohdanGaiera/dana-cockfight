@@ -101,7 +101,40 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             with open(fallback_image_path, "rb") as f:
                 fallback_image = f.read()
 
-        for fighter in state.fighters:
+        # Hype messages between fighters (5 messages for fighters 1-5, none after the last one)
+        hype_messages = [
+            "Але це ще тільки початок... Хто наступний? 😈🔥",
+            "Йоооо! А ось і ще один претендент на корону... 👑💀",
+            "Думаєш це все? ХУЙНЯ! Далі буде ще жорсткіше! 🤯",
+            "Зачекай-зачекай... Ще не все! Наступний боєць — ЛЕГЕНДА! 🏆😈",
+            "І НАРЕШТІ... Останній! Той, заради кого ми тут зібралися... 🎂👊",
+        ]
+
+        # Opening announcement with intro image
+        intro_image_path = Path("data/data_cockfight/into_message.png")
+        opening_caption = (
+            "🔥🐓 DANA COCKFIGHT PRESENTS 🐓🔥\n\n"
+            "Йо-йо-йоооо! Вітаю на Trash Beach Party! 🏖️🔥\n"
+            "Шість божевільних півнів! Шість ще божевільніших друзів!\n"
+            "Найкрейзовіший турнір півнячих боїв серед своїх!\n"
+            "Хто виживе? Хто обісреться?\n"
+            "Зараз дізнаємось!\n\n"
+            "ОГОЛОШУЄМО БІЙЦІВ! 👊💀"
+        )
+
+        if intro_image_path.exists():
+            with open(intro_image_path, "rb") as f:
+                intro_image = f.read()
+            await update.message.reply_photo(
+                photo=intro_image,
+                caption=opening_caption,
+            )
+        else:
+            await update.message.reply_text(opening_caption)
+
+        await asyncio.sleep(2.0)
+
+        for idx, fighter in enumerate(state.fighters):
             try:
                 # Build caption (name is already on the presentation image)
                 caption = fighter.description
@@ -138,8 +171,11 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
                 logger.info(f"Sent presentation for {fighter.name}")
 
-                # Small delay between fighters to avoid rate limiting
-                await asyncio.sleep(0.5)
+                # Send hype message after each fighter (except the last one)
+                if idx < len(state.fighters) - 1:
+                    await asyncio.sleep(1.0)
+                    await update.message.reply_text(hype_messages[idx])
+                    await asyncio.sleep(1.5)
 
             except Exception as e:
                 logger.error(f"Error sending fighter {fighter.name}: {e}", exc_info=True)
@@ -148,7 +184,9 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
 
         await update.message.reply_text(
-            "Ось усі 6 бійців! Вони з нетерпінням очікують на жеребкування! 🐓🔥"
+            "🏆💀 ОСЬ ВОНИ — 6 ЛЕГЕНД! 💀🏆\n\n"
+            "Всі на місці! Півні готові!\n"
+            "Trash Beach Party може починатися! 🏖️🔥"
         )
 
     except Exception as e:

@@ -44,7 +44,7 @@ def load_fighters() -> list[Fighter]:
     """
     base_path = Path(__file__).parent.parent / "data" / "images"
 
-    fighter_names = ["andrew_3", "bohdan", "oleg", "petro", "roma", "vadym"]
+    fighter_names = ["petro", "oleg", "vadym", "roma", "andrew_3", "bohdan"]
     fighters: list[Fighter] = []
 
     # Fighter descriptions (trashy party tone - Ukrainian with emojis)
@@ -88,7 +88,6 @@ def load_fighters() -> list[Fighter]:
         "vadym": """Зараз у Штатах, але навіть на відстані його півень може всім НАВАЛЯТИ! 🇺🇸👊
 Власник Buba Tea — чайної в стилі Балі. 🧋🌴
 Подає найкращі чаї, поки ти подаєш надії.
-Приводить лідів на Upwork — справжній бізнесмен!
 Його півень працює remote, але б'є ЛОКАЛЬНО.
 Distance is not a barrier — для нього і для болю, який він принесе! 💼💀""",
     }
@@ -105,17 +104,17 @@ Distance is not a barrier — для нього і для болю, який в�
             logger.warning(f"Rooster image not found for {name}: {rooster_path}")
             continue
 
-        # Find human photo: try telegram-*.jpg first, then "image copy.png"
+        # Find human photo: try telegram-*.jpg first, then "image copy*.png"
         human_photos = list(fighter_dir.glob("telegram-*.jpg"))
         human_path: Path | None = None
 
         if human_photos:
             human_path = human_photos[0]  # Use first match
         else:
-            # Fallback to "image copy.png" for fighters without telegram photos
-            copy_path = fighter_dir / "image copy.png"
-            if copy_path.exists():
-                human_path = copy_path
+            # Fallback to "image copy.png" or "image copy 2.png" for fighters without telegram photos
+            copy_paths = list(fighter_dir.glob("image copy*.png"))
+            if copy_paths:
+                human_path = copy_paths[0]
             else:
                 logger.warning(f"No human photo found for {name}")
                 continue
