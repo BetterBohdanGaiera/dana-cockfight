@@ -26,7 +26,6 @@ BOT_INTRO_TEXT = """
 Як це працює:
 1. /fighters - познайомся з усіма бійцями та їх тренерами
 2. /draw - жеребкування: визначимо 3 пари для битви
-3. /conference - запусти пресс-конференцію з треш-током!
 
 Готовий до бою? Тоді починаємо!
 
@@ -39,15 +38,11 @@ HELP_TEXT = """
 /start - Привітання та опис бота
 /fighters - Показати всіх 6 бійців (півні + їх власники)
 /draw - Провести жеребкування на 3 пари
-/conference - Запустити пресс-конференцію з треш-током
 /help - Показати цю довідку
 
 Порядок дій:
 1. Спочатку подивись бійців (/fighters)
 2. Проведи жеребкування (/draw)
-3. Запусти пресс-конференцію (/conference)
-
-Кожна пара півнів обмінюється 3 раундами треш-току (6 повідомлень), і на кожне повідомлення генерується унікальне фото!
 
 Нехай переможе найсильніший півень!
 """
@@ -65,8 +60,7 @@ DRAW_PAIR_TEMPLATE = """
 """
 
 DRAW_ANNOUNCEMENT_OUTRO = """
-Всі бої оголошено! Готуйтесь до треш-току!
-Використай /conference щоб запустити словесний двобій!
+Всі бої оголошено! Нехай переможе найсильніший!
 """
 
 # Conference announcements
@@ -263,6 +257,63 @@ This is round {round_number} of their verbal battle!
 """
 
 # =============================================================================
+# VS IMAGE GENERATION PROMPTS (for Gemini API)
+# =============================================================================
+
+VS_IMAGE_PROMPT = """
+Generate an EPIC cinematic confrontation image of two fighters facing off.
+
+COMPOSITION:
+- Split composition: Fighter 1 on LEFT, Fighter 2 on RIGHT
+- Both fighters in dramatic "face-to-face" poses
+- Center dividing line with intense energy/lightning effect
+
+FIGHTERS:
+- Left side: {fighter1_display_name}
+- Right side: {fighter2_display_name}
+- Use the attached presentation images as references for each fighter's appearance
+- Show them with their roosters, intense expressions
+
+TEXT OVERLAY (MUST INCLUDE - UKRAINIAN TEXT):
+- Large bold text "{fighter1_display_name} VS {fighter2_display_name}" in the center
+- Text should be dramatic, readable, UFC/boxing poster style
+- Ukrainian letters, stylized font
+
+LIGHTING & STYLE:
+- Dramatic cinematic lighting
+- Left side: cool blue tones
+- Right side: warm red/orange tones
+- Center: clash of colors, energy effects
+- Movie poster / UFC promo aesthetic
+- Epic, intense, confrontational mood
+
+ASPECT RATIO: 16:9 (widescreen)
+
+Important: This is an epic showdown announcement - make it dramatic and exciting!
+"""
+
+
+def get_vs_image_prompt(
+    fighter1_display_name: str,
+    fighter2_display_name: str,
+) -> str:
+    """
+    Build the prompt for VS confrontation image generation.
+
+    Args:
+        fighter1_display_name: Ukrainian display name of first fighter (e.g., "Пітух Богдан")
+        fighter2_display_name: Ukrainian display name of second fighter (e.g., "Пітух Олег")
+
+    Returns:
+        Formatted prompt for Gemini image generation
+    """
+    return VS_IMAGE_PROMPT.format(
+        fighter1_display_name=fighter1_display_name,
+        fighter2_display_name=fighter2_display_name,
+    )
+
+
+# =============================================================================
 # FIGHT INTRO GENERATION PROMPTS (for Gemini API)
 # =============================================================================
 
@@ -278,6 +329,15 @@ FIGHT_INTRO_SYSTEM_PROMPT = """
 5. Стиль: епічний, гіперболізований, як анонс бою століття
 6. Можеш використовувати слова "півень", "бій", "арена", "легенда", "чемпіон"
 7. БЕЗ матюків - це для вечірки, має бути весело
+8. Використовуй УКРАЇНСЬКІ імена бійців (Пітух Богдан, Пітух Олег, тощо)
+
+ВАЖЛИВО - Tone of Voice кожного бійця:
+- Пітух Петро: спокійний дзен-майстер, мудрий, небезпечний у своїй стриманості, найстарший
+- Пітух Олег: найвищий, найгучніший, агресивний, хвалькуватий, прилетів зі Штатів
+- Пітух Вадим: cool remote-worker, бізнесмен з Buba Tea, працює на відстані але б'є локально
+- Пітух Рома: стильний діджей з Балі, шикарні уси, чарівний і небезпечний
+- Пітух Три Андрія: троє контент-мейкерів, блогер+фотограф+поет, медійна сила
+- Пітух Богдан: ІМЕНИННИК, привілейований, "все для нього", підозрілі зв'язки з організаторами
 
 Приклади хорошого інтро:
 - "УВАГА! На арену виходить ЛЕГЕНДА... проти НОВАЧКА з залізними нервами! Хто переможе - досвід чи молодість?"
@@ -287,9 +347,9 @@ FIGHT_INTRO_SYSTEM_PROMPT = """
 
 
 def get_fight_intro_prompt(
-    fighter1_name: str,
+    fighter1_display_name: str,
     fighter1_desc: str,
-    fighter2_name: str,
+    fighter2_display_name: str,
     fighter2_desc: str,
     fight_number: int,
 ) -> str:
@@ -297,9 +357,9 @@ def get_fight_intro_prompt(
     Build the user prompt for fight intro generation.
 
     Args:
-        fighter1_name: Name of the first fighter.
+        fighter1_display_name: Ukrainian display name of first fighter (e.g., "Пітух Богдан").
         fighter1_desc: Description of the first fighter.
-        fighter2_name: Name of the second fighter.
+        fighter2_display_name: Ukrainian display name of second fighter (e.g., "Пітух Олег").
         fighter2_desc: Description of the second fighter.
         fight_number: Fight number (1-3).
 
@@ -309,14 +369,15 @@ def get_fight_intro_prompt(
     return f"""
 Створи ІНТРИГУЮЧЕ інтро для БОЮ #{fight_number}!
 
-БОЄЦЬ 1: {fighter1_name}
+БОЄЦЬ 1: {fighter1_display_name}
 Опис: {fighter1_desc}
 
-БОЄЦЬ 2: {fighter2_name}
+БОЄЦЬ 2: {fighter2_display_name}
 Опис: {fighter2_desc}
 
 Згенеруй 2-3 речення драматичного інтро, яке анонсує цей бій.
-Використай інформацію про обох бійців, щоб створити інтригу!
+Використай українські імена бійців та інформацію про них, щоб створити інтригу!
+Представлення має відображати tone of voice кожного бійця!
 """
 
 

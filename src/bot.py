@@ -9,7 +9,6 @@ Commands:
     /help - List all commands and workflow
     /fighters - Display all 6 pre-loaded fighters
     /draw - Randomly create 3 pairs for battles
-    /conference - Run press conference with trash-talk
 """
 
 import asyncio
@@ -33,9 +32,8 @@ from .prompts import (
     get_conference_start_message,
     get_conference_end_message,
 )
-from .image_generator import generate_scene_image_safe
+from .image_generator import generate_scene_image_safe, generate_vs_image_with_retry
 from .text_generator import generate_trash_talk, generate_fight_intro
-from .collage_generator import create_vs_collage
 from .state_manager import get_game_state
 
 # Telegram message limits (conservative to be safe)
@@ -228,15 +226,15 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         await asyncio.sleep(1.5)
 
-        # Announce each fight with VS collage and AI intro
+        # Announce each fight with AI-generated VS image and intro
         for fight_num, (fighter1, fighter2) in enumerate(pairings, 1):
             try:
-                # Generate AI intro for this fight
+                # Generate AI intro for this fight (using display names)
                 intro = await asyncio.to_thread(
                     generate_fight_intro,
-                    fighter1_name=fighter1.name,
+                    fighter1_name=fighter1.display_name,
                     fighter1_description=fighter1.description,
-                    fighter2_name=fighter2.name,
+                    fighter2_name=fighter2.display_name,
                     fighter2_description=fighter2.description,
                     fight_number=fight_num,
                 )
@@ -247,18 +245,18 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 fighter1_presentation = fighter1_dir / "presentation.png"
                 fighter2_presentation = fighter2_dir / "presentation.png"
 
-                # Create VS collage
-                collage = await asyncio.to_thread(
-                    create_vs_collage,
+                # Generate VS image using Gemini AI (with retry logic)
+                vs_image = await asyncio.to_thread(
+                    generate_vs_image_with_retry,
                     str(fighter1_presentation),
                     str(fighter2_presentation),
-                    fighter1.name,
-                    fighter2.name,
+                    fighter1.display_name,
+                    fighter2.display_name,
                 )
 
-                # Build caption
+                # Build caption with Ukrainian display names
                 caption = (
-                    f"БІЙ {fight_num}: {fighter1.name} VS {fighter2.name}\n\n"
+                    f"БІЙ {fight_num}: {fighter1.display_name} VS {fighter2.display_name}\n\n"
                     f"{intro}"
                 )
 
@@ -266,14 +264,18 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 if len(caption) > CAPTION_LIMIT:
                     caption = caption[: CAPTION_LIMIT - 3] + "..."
 
-                # Send photo with caption
-                await update.message.reply_photo(
-                    photo=collage,
-                    caption=caption,
-                )
+                # Send photo with caption (or text-only if image generation failed)
+                if vs_image:
+                    await update.message.reply_photo(
+                        photo=vs_image,
+                        caption=caption,
+                    )
+                else:
+                    # Fallback: send text-only if VS image generation failed
+                    await update.message.reply_text(caption)
 
                 logger.info(
-                    f"Announced fight {fight_num}: {fighter1.name} vs {fighter2.name}"
+                    f"Announced fight {fight_num}: {fighter1.display_name} vs {fighter2.display_name}"
                 )
 
                 # Dramatic delay between announcements
@@ -286,7 +288,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
                 # Fallback: send text-only announcement
                 await update.message.reply_text(
-                    f"БІЙ {fight_num}: {fighter1.name} VS {fighter2.name}"
+                    f"БІЙ {fight_num}: {fighter1.display_name} VS {fighter2.display_name}"
                 )
 
         # Send outro message
@@ -529,7 +531,6 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("fighters", fighters_command))
     application.add_handler(CommandHandler("draw", draw_command))
-    application.add_handler(CommandHandler("conference", conference_command))
 
     # Add error handler
     application.add_error_handler(error_handler)

@@ -18,12 +18,14 @@ class Fighter:
 
     Attributes:
         name: Fighter name (e.g., "andrew_3", "bohdan")
+        display_name: Ukrainian display name (e.g., "Пітух Богдан")
         description: Brief description of rooster/trainer in Ukrainian
         rooster_image_path: Absolute path to rooster image (image.png)
         human_image_path: Absolute path to human/trainer image
     """
 
     name: str
+    display_name: str
     description: str
     rooster_image_path: str
     human_image_path: str
@@ -46,6 +48,16 @@ def load_fighters() -> list[Fighter]:
 
     fighter_names = ["petro", "oleg", "vadym", "roma", "andrew_3", "bohdan"]
     fighters: list[Fighter] = []
+
+    # Ukrainian display names for fighters
+    display_names: dict[str, str] = {
+        "andrew_3": "Пітух Три Андрія",
+        "bohdan": "Пітух Богдан",
+        "oleg": "Пітух Олег",
+        "petro": "Пітух Петро",
+        "roma": "Пітух Рома",
+        "vadym": "Пітух Вадим",
+    }
 
     # Fighter descriptions (trashy party tone - Ukrainian with emojis)
     descriptions: dict[str, str] = {
@@ -122,6 +134,7 @@ Distance is not a barrier — для нього і для болю, який в�
         fighters.append(
             Fighter(
                 name=name,
+                display_name=display_names.get(name, f"Пітух {name.capitalize()}"),
                 description=descriptions.get(name, "Mysterious fighter"),
                 rooster_image_path=str(rooster_path),
                 human_image_path=str(human_path),

@@ -17,7 +17,7 @@ from google import genai
 from google.genai import types
 
 from .config import GEMINI_API_KEY, GEMINI_MODEL
-from .prompts import get_fighter_portrait_prompt, get_scene_image_prompt, get_presentation_image_prompt
+from .prompts import get_fighter_portrait_prompt, get_scene_image_prompt, get_presentation_image_prompt, get_vs_image_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -502,3 +502,156 @@ def generate_presentation_image_safe(
         else:
             logger.warning(f"Presentation image generation failed, returning None: {e}")
         return None
+
+
+def generate_vs_image(
+    fighter1_presentation_path: str,
+    fighter2_presentation_path: str,
+    fighter1_display_name: str,
+    fighter2_display_name: str,
+) -> bytes:
+    """Generate an epic VS confrontation image using Gemini.
+
+    Creates a dramatic split-screen style image showing two fighters
+    facing off, with their names overlaid in UFC/boxing poster style.
+
+    Args:
+        fighter1_presentation_path: Path to first fighter's presentation.png.
+        fighter2_presentation_path: Path to second fighter's presentation.png.
+        fighter1_display_name: Ukrainian display name of first fighter (e.g., "Пітух Богдан").
+        fighter2_display_name: Ukrainian display name of second fighter (e.g., "Пітух Олег").
+
+    Returns:
+        bytes: Generated image data (PNG/JPEG).
+
+    Raises:
+        FileNotFoundError: If any presentation image is not found.
+        ValueError: If image generation fails.
+        Exception: For other API errors.
+    """
+    logger.info(
+        f"Generating VS image: {fighter1_display_name} vs {fighter2_display_name}"
+    )
+
+    try:
+        # Read both presentation images
+        fighter1_bytes, fighter1_mime = _read_image_file(fighter1_presentation_path)
+        fighter2_bytes, fighter2_mime = _read_image_file(fighter2_presentation_path)
+
+        logger.debug(
+            f"Loaded presentation images: fighter1={len(fighter1_bytes)} bytes, "
+            f"fighter2={len(fighter2_bytes)} bytes"
+        )
+
+        # Build prompt
+        prompt = get_vs_image_prompt(fighter1_display_name, fighter2_display_name)
+
+        # Get client
+        client = _get_client()
+
+        # Build content with prompt and reference images
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=prompt),
+                    types.Part.from_bytes(
+                        data=fighter1_bytes,
+                        mime_type=fighter1_mime,
+                    ),
+                    types.Part.from_bytes(
+                        data=fighter2_bytes,
+                        mime_type=fighter2_mime,
+                    ),
+                ],
+            )
+        ]
+
+        # Generate image with 16:9 aspect ratio
+        logger.info(f"Calling Gemini API for VS image (model: {GEMINI_MODEL})")
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_modalities=["Text", "Image"],
+                image_config=types.ImageConfig(
+                    aspect_ratio="16:9",
+                ),
+            ),
+        )
+
+        # Extract image from response
+        image_bytes = _extract_image_from_response(response)
+        logger.info(
+            f"Successfully generated VS image for {fighter1_display_name} vs "
+            f"{fighter2_display_name} ({len(image_bytes)} bytes)"
+        )
+
+        return image_bytes
+
+    except FileNotFoundError:
+        logger.error(
+            f"Presentation image not found for VS generation: "
+            f"{fighter1_display_name} or {fighter2_display_name}"
+        )
+        raise
+    except ValueError as e:
+        logger.error(
+            f"VS image generation failed for {fighter1_display_name} vs "
+            f"{fighter2_display_name}: {e}"
+        )
+        raise
+    except Exception as e:
+        logger.error(
+            f"Unexpected error generating VS image for {fighter1_display_name} vs "
+            f"{fighter2_display_name}: {e}"
+        )
+        raise
+
+
+def generate_vs_image_with_retry(
+    fighter1_presentation_path: str,
+    fighter2_presentation_path: str,
+    fighter1_display_name: str,
+    fighter2_display_name: str,
+    max_retries: int = 3,
+    retry_delay: float = 1.0,
+) -> Optional[bytes]:
+    """Generate VS image with retry logic.
+
+    Same as generate_vs_image but retries up to max_retries times
+    on failure before returning None.
+
+    Args:
+        fighter1_presentation_path: Path to first fighter's presentation.png.
+        fighter2_presentation_path: Path to second fighter's presentation.png.
+        fighter1_display_name: Ukrainian display name of first fighter.
+        fighter2_display_name: Ukrainian display name of second fighter.
+        max_retries: Maximum number of retry attempts (default 3).
+        retry_delay: Delay in seconds between retries (default 1.0).
+
+    Returns:
+        Optional[bytes]: Generated image data or None if all retries failed.
+    """
+    import time
+
+    for attempt in range(max_retries):
+        try:
+            return generate_vs_image(
+                fighter1_presentation_path=fighter1_presentation_path,
+                fighter2_presentation_path=fighter2_presentation_path,
+                fighter1_display_name=fighter1_display_name,
+                fighter2_display_name=fighter2_display_name,
+            )
+        except Exception as e:
+            logger.warning(
+                f"VS image generation attempt {attempt + 1}/{max_retries} failed: {e}"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+
+    logger.error(
+        f"VS image generation failed after {max_retries} attempts for "
+        f"{fighter1_display_name} vs {fighter2_display_name}"
+    )
+    return None
