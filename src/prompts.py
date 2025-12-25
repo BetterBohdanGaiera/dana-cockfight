@@ -65,8 +65,8 @@ DRAW_PAIR_TEMPLATE = """
 """
 
 DRAW_ANNOUNCEMENT_OUTRO = """
-Готуйтесь до пресс-конференції!
-Використай /conference щоб запустити треш-ток!
+Всі бої оголошено! Готуйтесь до треш-току!
+Використай /conference щоб запустити словесний двобій!
 """
 
 # Conference announcements
@@ -261,6 +261,64 @@ Style:
 
 This is round {round_number} of their verbal battle!
 """
+
+# =============================================================================
+# FIGHT INTRO GENERATION PROMPTS (for Gemini API)
+# =============================================================================
+
+FIGHT_INTRO_SYSTEM_PROMPT = """
+Ти - легендарний анонсер боїв півнів у стилі Брюса Баффера (UFC) та Майкла Баффера (бокс).
+Твоя задача - створити ІНТРИГУЮЧЕ, ХАЙПОВЕ інтро для бою українською мовою.
+
+Правила:
+1. Максимум 2-3 речення
+2. Використовуй драматичні паузи та емоційні слова
+3. Згадай ключові характеристики обох бійців
+4. Створи інтригу - хто ж переможе?
+5. Стиль: епічний, гіперболізований, як анонс бою століття
+6. Можеш використовувати слова "півень", "бій", "арена", "легенда", "чемпіон"
+7. БЕЗ матюків - це для вечірки, має бути весело
+
+Приклади хорошого інтро:
+- "УВАГА! На арену виходить ЛЕГЕНДА... проти НОВАЧКА з залізними нервами! Хто переможе - досвід чи молодість?"
+- "Це буде БІЙ РОКУ! Два непереможних титани зіткнуться у двобої, від якого здригнеться вся арена!"
+- "Він прийшов із штатів голодний до перемоги... А його суперник - ветеран сотні боїв! ГОТУЙТЕСЬ!"
+"""
+
+
+def get_fight_intro_prompt(
+    fighter1_name: str,
+    fighter1_desc: str,
+    fighter2_name: str,
+    fighter2_desc: str,
+    fight_number: int,
+) -> str:
+    """
+    Build the user prompt for fight intro generation.
+
+    Args:
+        fighter1_name: Name of the first fighter.
+        fighter1_desc: Description of the first fighter.
+        fighter2_name: Name of the second fighter.
+        fighter2_desc: Description of the second fighter.
+        fight_number: Fight number (1-3).
+
+    Returns:
+        Formatted user prompt for Gemini API.
+    """
+    return f"""
+Створи ІНТРИГУЮЧЕ інтро для БОЮ #{fight_number}!
+
+БОЄЦЬ 1: {fighter1_name}
+Опис: {fighter1_desc}
+
+БОЄЦЬ 2: {fighter2_name}
+Опис: {fighter2_desc}
+
+Згенеруй 2-3 речення драматичного інтро, яке анонсує цей бій.
+Використай інформацію про обох бійців, щоб створити інтригу!
+"""
+
 
 # =============================================================================
 # TRASH TALK GENERATION PROMPTS (for Claude API)

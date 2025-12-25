@@ -29,12 +29,13 @@ from .prompts import (
     BOT_INTRO_TEXT,
     HELP_TEXT,
     NO_DRAW_YET_TEXT,
-    get_draw_announcement,
+    DRAW_ANNOUNCEMENT_OUTRO,
     get_conference_start_message,
     get_conference_end_message,
 )
 from .image_generator import generate_scene_image_safe
-from .text_generator import generate_trash_talk
+from .text_generator import generate_trash_talk, generate_fight_intro
+from .collage_generator import create_vs_collage
 from .state_manager import get_game_state
 
 # Telegram message limits (conservative to be safe)
@@ -102,8 +103,8 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         for fighter in state.fighters:
             try:
-                # Build caption
-                caption = f"*{fighter.name}*\n{fighter.description}"
+                # Build caption (name is already on the presentation image)
+                caption = fighter.description
 
                 # Truncate caption if too long
                 if len(caption) > CAPTION_LIMIT:
@@ -147,7 +148,7 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 )
 
         await update.message.reply_text(
-            "Ось усі 6 бійців! Використай /draw для жеребкування."
+            "Ось усі 6 бійців! Вони з нетерпінням очікують на жеребкування! 🐓🔥"
         )
 
     except Exception as e:
@@ -161,7 +162,8 @@ async def fighters_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /draw command.
 
-    Randomly pairs 6 fighters into 3 matches and announces the pairings.
+    Randomly pairs 6 fighters into 3 matches and announces each pairing
+    with a VS collage image and AI-generated dramatic intro.
     """
     if not update.message or not update.effective_chat:
         return
@@ -181,13 +183,77 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Perform the draw
         pairings = state.draw_pairings()
 
-        # Format pairing names for announcement
-        pairing_names = [(p[0].name, p[1].name) for p in pairings]
+        # Send intro message
+        await update.message.reply_text(
+            "УВАГА! ЖЕРЕБКУВАННЯ ПРОВЕДЕНО!\n\n"
+            "Сьогодні на арені зустрінуться..."
+        )
+        await asyncio.sleep(1.5)
 
-        # Get formatted announcement
-        announcement = get_draw_announcement(pairing_names)
+        # Announce each fight with VS collage and AI intro
+        for fight_num, (fighter1, fighter2) in enumerate(pairings, 1):
+            try:
+                # Generate AI intro for this fight
+                intro = await asyncio.to_thread(
+                    generate_fight_intro,
+                    fighter1_name=fighter1.name,
+                    fighter1_description=fighter1.description,
+                    fighter2_name=fighter2.name,
+                    fighter2_description=fighter2.description,
+                    fight_number=fight_num,
+                )
 
-        await update.message.reply_text(announcement)
+                # Get presentation image paths
+                fighter1_dir = Path(fighter1.rooster_image_path).parent
+                fighter2_dir = Path(fighter2.rooster_image_path).parent
+                fighter1_presentation = fighter1_dir / "presentation.png"
+                fighter2_presentation = fighter2_dir / "presentation.png"
+
+                # Create VS collage
+                collage = await asyncio.to_thread(
+                    create_vs_collage,
+                    str(fighter1_presentation),
+                    str(fighter2_presentation),
+                    fighter1.name,
+                    fighter2.name,
+                )
+
+                # Build caption
+                caption = (
+                    f"БІЙ {fight_num}: {fighter1.name} VS {fighter2.name}\n\n"
+                    f"{intro}"
+                )
+
+                # Truncate if too long
+                if len(caption) > CAPTION_LIMIT:
+                    caption = caption[: CAPTION_LIMIT - 3] + "..."
+
+                # Send photo with caption
+                await update.message.reply_photo(
+                    photo=collage,
+                    caption=caption,
+                )
+
+                logger.info(
+                    f"Announced fight {fight_num}: {fighter1.name} vs {fighter2.name}"
+                )
+
+                # Dramatic delay between announcements
+                if fight_num < 3:
+                    await asyncio.sleep(2)
+
+            except Exception as e:
+                logger.error(
+                    f"Error announcing fight {fight_num}: {e}", exc_info=True
+                )
+                # Fallback: send text-only announcement
+                await update.message.reply_text(
+                    f"БІЙ {fight_num}: {fighter1.name} VS {fighter2.name}"
+                )
+
+        # Send outro message
+        await asyncio.sleep(1)
+        await update.message.reply_text(DRAW_ANNOUNCEMENT_OUTRO)
 
         logger.info(
             f"Draw completed for chat {chat_id}: "

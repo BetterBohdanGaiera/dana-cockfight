@@ -10,7 +10,12 @@ import logging
 from google import genai
 
 from .config import GEMINI_API_KEY, GEMINI_TEXT_MODEL
-from .prompts import TRASH_TALK_SYSTEM_PROMPT, get_trash_talk_user_prompt
+from .prompts import (
+    TRASH_TALK_SYSTEM_PROMPT,
+    get_trash_talk_user_prompt,
+    FIGHT_INTRO_SYSTEM_PROMPT,
+    get_fight_intro_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +96,68 @@ def generate_trash_talk(
         logger.error(f"Trash-talk generation failed for {fighter_name}: {e}")
         # Return fallback text in Ukrainian
         return f"Ку-ка-рі-куууу! Я {fighter_name} і я готовий до бою!"
+
+
+def generate_fight_intro(
+    fighter1_name: str,
+    fighter1_description: str,
+    fighter2_name: str,
+    fighter2_description: str,
+    fight_number: int,
+) -> str:
+    """
+    Generate dramatic fight intro announcement in Ukrainian.
+
+    Creates an exciting, hype-style intro for a fight matchup
+    using AI generation in the style of UFC/boxing announcers.
+
+    Args:
+        fighter1_name: Name of the first fighter.
+        fighter1_description: Description of the first fighter.
+        fighter2_name: Name of the second fighter.
+        fighter2_description: Description of the second fighter.
+        fight_number: Fight number (1-3).
+
+    Returns:
+        str: Generated Ukrainian fight intro text.
+            Returns a fallback message if generation fails.
+    """
+    try:
+        client = _get_client()
+
+        # Build user prompt using the prompt template
+        user_prompt = get_fight_intro_prompt(
+            fighter1_name=fighter1_name,
+            fighter1_desc=fighter1_description,
+            fighter2_name=fighter2_name,
+            fighter2_desc=fighter2_description,
+            fight_number=fight_number,
+        )
+
+        # Combine system prompt and user prompt
+        full_prompt = f"{FIGHT_INTRO_SYSTEM_PROMPT}\n\n{user_prompt}"
+
+        # Call Gemini API
+        response = client.models.generate_content(
+            model=GEMINI_TEXT_MODEL,
+            contents=full_prompt,
+        )
+
+        # Extract text from response
+        intro = response.text
+
+        logger.info(
+            f"Generated fight intro for {fighter1_name} vs {fighter2_name} "
+            f"(fight {fight_number})"
+        )
+        return intro.strip()
+
+    except Exception as e:
+        logger.error(
+            f"Fight intro generation failed for {fighter1_name} vs {fighter2_name}: {e}"
+        )
+        # Return fallback intro in Ukrainian
+        return (
+            f"БІЙ #{fight_number}: На арену виходять два непереможних бійці! "
+            f"{fighter1_name} проти {fighter2_name}! Хто переможе?"
+        )
